@@ -157,7 +157,7 @@ public:
     ToolStatus toolStatus;
     JBCComm();
     void Init();
-    void Process();
+    uint8_t Process();
     void SendMessage(JBCCommand command, uint8_t * data, uint8_t length);
     
     using ToolStatusUpdatedEvent = void (*)(); 
@@ -194,7 +194,7 @@ private:
     void UpdateToolDelaytime(uint16_t timeToSleepHibern, ToolFutureMode toolFutureMode);
     void RxPacket(uint8_t length);
     void DecodeRx();
-    void tryRx();
+    uint8_t tryRx();
     void SendBlock(uint8_t * data, uint8_t length);
     // Generic USB device
     USB Usb;
@@ -216,6 +216,8 @@ private:
     uint8_t txbuf[64];
     
     ToolStatusUpdatedEvent toolStatusUpdatedCallback;
+    bool responseWaiting;
+    uint32_t startResponseWait;
     // Waiting flag and timer for the commState state machine
     bool commWaiting;
     uint32_t startWait;

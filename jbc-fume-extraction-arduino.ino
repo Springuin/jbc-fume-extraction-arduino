@@ -3,9 +3,13 @@
 
 JBCComm jbcComm = JBCComm();
 
+/* Note: Pins 9-13 are used for the interface to the USB host shield */
+const unsigned int LEDPIN = 8;
+
 uint32_t fumeExtractorTimer;
 #define FUME_EXTRACT_ON_DELAY 1000
-#define FUME_EXTRACT_OFF_DELAY 3000
+// The Weller KH-E has it's own delay, so the off delay can be short. When using a relay, this can be longer, e.g. 3 seconds.
+#define FUME_EXTRACT_OFF_DELAY 10
 
 typedef enum {
     fe_Off,
@@ -18,10 +22,10 @@ FumeExtractionState feState = fe_Off;
 void fumeExtractorSet(bool on) {
     if (on) {
         Serial.println("Extraction on");
-        digitalWrite(LED_BUILTIN, HIGH);
+        digitalWrite(LEDPIN, HIGH);
     } else {
         Serial.println("Extraction off");
-        digitalWrite(LED_BUILTIN, LOW);
+        digitalWrite(LEDPIN, LOW);
     }
 }
 
@@ -67,11 +71,21 @@ void toolStatusUpdated() {
 void setup() {
     Serial.begin(115200);
     jbcComm.Init();
-    pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(LEDPIN, OUTPUT);
     fumeExtractorSet(false);
     jbcComm.RegisterToolstatusUpdatedCallback(toolStatusUpdated);
 }
 
 void loop() {
-    jbcComm.Process();
+    uint8_t result = jbcComm.Process();
+    if (result != 0) {
+        // Reinitialize attempt
+        Serial.print("Reinitializing. Result: ");
+        Serial.println(result);
+        
+        // Delay to avoid overflooding the UART
+        delay(1000);
+        
+        jbcComm.Init();
+    }    
 }

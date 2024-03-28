@@ -70,7 +70,9 @@ void JBCComm::Init() {
         Serial.println("USB did not start.");
     }
     // Initialize processing timeout
+    commState = Comm_Start;
     lastStateChange = millis();
+    commWaiting = false;
 }
 
 
@@ -116,11 +118,18 @@ void JBCComm::SendMessage(JBCCommand command, uint8_t * data, uint8_t length) {
 
 
 // Try to receive data from USB and put it in rxbuf. rxCount contains the number of bytes received.
-void JBCComm::tryRx() {
+// Returns the returncode from RcvData. 0 if success.
+uint8_t JBCComm::tryRx() {
     memset(rxbuf, 0, sizeof(rxbuf));
 
     rxCount = 64;
     uint8_t rcode = cp210x.RcvData(&rxCount, rxbuf);    
+    #if JBC_DEBUGPRINT
+    Serial.print("tryRx rxCount: " );
+    Serial.print(rxCount, DEC);
+    Serial.print(" rcode: ");
+    Serial.println(rcode, HEX);
+    #endif
 }
 
 void JBCComm::PrintToolStatus() {
@@ -299,19 +308,29 @@ void JBCComm::DecodeRx() {
 }
 
 
-void JBCComm::Process() {
+/** Returns 0 if success, anything else is an error and requires reinitalization. */
+uint8_t JBCComm::Process() {
+    uint8_t rxresult = 0;
+    uint8_t error = 0;
     Usb.Task();
     uint8_t taskState = Usb.getUsbTaskState();
-    if ( taskState != USB_STATE_RUNNING )
-    {
-        return;
+    if ( taskState != USB_STATE_RUNNING ) {
+        if (taskState == USB_DETACHED_SUBSTATE_WAIT_FOR_DEVICE) {
+            Serial.println("No device found");
+            return 1;
+        }
+        #if JBC_DEBUGPRINT
+        Serial.print("taskState: ");
+        Serial.println(taskState, HEX);
+        #endif
+        return 0;
     }
     CommState prevCommState = commState;
     // handle sync an data readout
     switch(commState) { 
         // Handshake states
         case Comm_Start:
-            tryRx();
+            rxresult = tryRx();
             if ((rxCount > 0) && rxbuf[0] == M_NACK) {
                 txbuf[0] = M_SYN;
                 SendBlock(txbuf, 1);
@@ -319,7 +338,7 @@ void JBCComm::Process() {
             }
             break;
         case Comm_SynAck:
-            tryRx();
+            rxresult = tryRx();
             if ((rxCount > 0) && rxbuf[0] == M_ACK) {
                 txbuf[0] = M_ACK;
                 SendBlock(txbuf, 1);
@@ -327,7 +346,7 @@ void JBCComm::Process() {
             }
             break;
         case Comm_AckAck:
-            tryRx();
+            rxresult = tryRx();
             if ((rxCount > 0) && rxbuf[0] == SOH) {
                 txbuf[0] = M_ACK;
                 SendBlock(txbuf, 1);
@@ -364,9 +383,12 @@ void JBCComm::Process() {
         }       
         case Comm_Response:
             // Get packet(s) and decode if we receive something.
-            tryRx();
+            rxresult = tryRx();
             if (rxCount > 0) {
                 DecodeRx();
+            } else {
+                // No response, station off?
+                error = 1;
             }
             
             commState = Comm_Protostart;
@@ -392,6 +414,7 @@ void JBCComm::Process() {
         Serial.println("Response timeout, resetting state");
 #endif
         commState = Comm_Start;
+        lastStateChange = millis();
     }
     if (commState != prevCommState) {
         lastStateChange = millis();
@@ -399,8 +422,12 @@ void JBCComm::Process() {
         Serial.print("commState: ");
         Serial.print(prevCommState, DEC);
         Serial.print(" -> ");
-        Serial.println(commState, DEC);
+        Serial.print(commState, DEC);
+        Serial.print(" rxresult: ");
+        Serial.print(rxresult);
+        Serial.print(" rxcount: ");
+        Serial.println(rxCount);
 #endif
     }    
-
+    return error;
 }
